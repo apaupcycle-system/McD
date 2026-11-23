@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Generator BAST & Invoice</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
     --bg:#f4f5f7; --card:#fff; --ink:#1c2128; --muted:#667085; --line:#e2e5ea;
@@ -69,19 +70,19 @@
   .scaler{transform-origin:top left}
   .page{
     width:794px;height:1122px;background:#fff;color:#000;
-    padding:72px 76px;font-family:"Times New Roman",Times,serif;font-size:15.5px;line-height:1.5;
+    padding:60px 76px 56px;font-family:"Times New Roman",Times,serif;font-size:15.5px;line-height:1.5;
     box-shadow:0 2px 10px rgba(0,0,0,.25);overflow:hidden;
   }
   .page h3{margin:0 0 22px;text-align:center;font-size:17px;font-weight:700;text-decoration:underline}
   .page p{margin:0 0 12px;text-align:justify}
   .page table.id{border-collapse:collapse;margin:0 0 14px;width:100%}
   .page table.id td{vertical-align:top;padding:1px 0}
-  .page table.id td.k{width:190px} .page table.id td.c{width:14px}
+  .page table.id td.k{width:225px;white-space:nowrap} .page table.id td.c{width:14px}
   .page ol{margin:0 0 12px;padding-left:24px;text-align:justify}
   .page ol li{margin-bottom:10px;padding-left:4px}
-  .page .sign{display:flex;justify-content:space-between;margin-top:30px;text-align:center}
+  .page .sign{display:flex;justify-content:space-between;margin-top:22px;text-align:center}
   .page .sign>div{width:46%}
-  .page .space{height:86px}
+  .page .space{height:80px}
   .page .space.ttd{position:relative}
   .page .space.ttd img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:112px;width:auto}
 
@@ -687,6 +688,29 @@ function fileName(){
   const p = `${BULAN[opt.pMonth]}_${opt.pYear}`;
   return `${view === 'invoice' ? 'INVOICE' : 'BAST'}_${c}_${p}.pdf`;
 }
+async function pageToCanvas(){
+  /* Render halaman A4 (794x1122) di holder yang menempel di (0,0) dokumen, bukan di luar layar,
+     supaya tidak terpotong di kiri/atas di HP maupun saat halaman sedang di-scroll. */
+  const holder = document.createElement('div');
+  holder.style.cssText = 'position:absolute;left:0;top:0;width:794px;height:1122px;z-index:-1;overflow:hidden;background:#fff;pointer-events:none';
+  const clone = $('page').cloneNode(true);
+  clone.style.boxShadow = 'none'; clone.style.margin = '0'; clone.style.transform = 'none';
+  holder.appendChild(clone); document.body.appendChild(holder);
+  const prevX = window.scrollX, prevY = window.scrollY;
+  try{
+    window.scrollTo(0,0);
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    await Promise.all([...clone.querySelectorAll('img')].map(i => i.decode ? i.decode().catch(()=>{}) : 0));
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return await html2canvas(clone, {
+      scale:3, useCORS:true, backgroundColor:'#ffffff', logging:false,
+      width:794, height:1122, x:0, y:0, scrollX:0, scrollY:0,
+      windowWidth:794, windowHeight:1122
+    });
+  } finally {
+    holder.remove(); window.scrollTo(prevX, prevY);
+  }
+}
 async function makePdf(all){
   if (!cur) return;
   if (all === true){
@@ -695,22 +719,15 @@ async function makePdf(all){
     showView(keep); return;
   }
   const btn = $('btnPdf'); btn.disabled = true; status('pdfStatus','Membuat PDF…');
-  const holder = document.createElement('div');
-  holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff';
-  const clone = $('page').cloneNode(true);
-  clone.style.boxShadow = 'none';
-  holder.appendChild(clone); document.body.appendChild(holder);
   try{
-    await html2pdf().set({
-      margin:0, filename:fileName(),
-      image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:3,useCORS:true,scrollX:0,scrollY:0,windowWidth:794},
-      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-    }).from(clone).save();
+    const canvas = await pageToCanvas();
+    const pdf = new window.jspdf.jsPDF({unit:'mm', format:'a4', orientation:'portrait', compress:true});
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    pdf.save(fileName());
     status('pdfStatus','PDF berhasil dibuat.','ok');
   }catch(e){
     status('pdfStatus','Gagal membuat PDF: '+e.message+'. Coba tombol Cetak lalu "Simpan sebagai PDF".','err');
-  }finally{ holder.remove(); btn.disabled = false; }
+  }finally{ btn.disabled = false; }
 }
 function printDoc(){
   if (!cur) return;
